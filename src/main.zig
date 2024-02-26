@@ -21,7 +21,7 @@ const QoiEnum = enum(u8) {
 // const QOI_OP_RUN: u8 = 0xC0;
 
 const QOI_MAGIC = "qoif";
-const QOI_PADDING: [8]u8 = .{ 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01 };
+const QOI_PADDING: *const [8]u8 = &.{ 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01 };
 
 pub const QoiDesc = struct {
     width: u32 = 0,
@@ -98,10 +98,17 @@ pub fn qoiInitializePixel(pixel: *QoiPixel) void {
 }
 
 pub fn qoiGetIndexPos(pixel: QoiPixel) u6 {
+<<<<<<< HEAD
     const r: u32 = pixel.vals.red;
     const g: u32 = pixel.vals.green;
     const b: u32 = pixel.vals.blue;
     const a: u32 = pixel.vals.alpha;
+=======
+    const r = pixel.vals.red;
+    const g = pixel.vals.green;
+    const b = pixel.vals.blue;
+    const a = pixel.vals.alpha;
+>>>>>>> ef91a23 (bugfix)
     return @truncate(r *% 3 +% g *% 5 +% b *% 7 +% a *% 11);
 }
 
@@ -170,8 +177,7 @@ fn qoiEncRGB(enc: *QoiEnc, px: QoiPixel) void {
     for (tags, 0..) |tag, i| {
         enc.offset[i] = tag;
     }
-
-    enc.offset += 4;
+    enc.offset += tags.len;
 }
 
 fn qoiEncRGBA(enc: *QoiEnc, px: QoiPixel) void {
@@ -186,8 +192,7 @@ fn qoiEncRGBA(enc: *QoiEnc, px: QoiPixel) void {
     for (tags, 0..) |tag, i| {
         enc.offset[i] = tag;
     }
-
-    enc.offset += 5;
+    enc.offset += tags.len;
 }
 
 fn qoiEncDifference(enc: *QoiEnc, red_diff: i32, green_diff: i32, blue_diff: i32) void {
@@ -216,8 +221,7 @@ fn qoiEncLuma(enc: *QoiEnc, green_diff: i8, dr_dg: i8, db_dg: i8) void {
     for (tags, 0..) |tag, i| {
         enc.offset[i] = tag;
     }
-
-    enc.offset += 2;
+    enc.offset += tags.len;
 }
 
 fn qoiEncodeChunk(desc: *QoiDesc, enc: *QoiEnc, qoi_pixel_bytes: [*]u8) void {
@@ -232,10 +236,11 @@ fn qoiEncodeChunk(desc: *QoiDesc, enc: *QoiEnc, qoi_pixel_bytes: [*]u8) void {
         @memcpy(&cur_pixel.channels, qoi_pixel_bytes[0..4]);
     }
 
-    const index_pos: u6 = qoiGetIndexPos(cur_pixel);
+    const index_pos = qoiGetIndexPos(cur_pixel);
 
     if (qoiComparePixel(cur_pixel, enc.prev_pixel, desc.channels)) {
-        if (enc.run + 1 >= 62 or enc.pixel_offset >= enc.len) {
+        enc.run += 1;
+        if (enc.run >= 62 or enc.pixel_offset >= enc.len) {
             qoiEncRun(enc);
         }
     } else {
@@ -278,10 +283,8 @@ fn qoiEncodeChunk(desc: *QoiDesc, enc: *QoiEnc, qoi_pixel_bytes: [*]u8) void {
     enc.pixel_offset += 1;
 
     if (qoiEncDone(enc)) {
-        for (QOI_PADDING, 0..) |PAD, i| {
-            enc.offset[i] = PAD;
-        }
-        enc.offset += 8;
+        @memcpy(enc.offset[0..QOI_PADDING.len], QOI_PADDING);
+        enc.offset += QOI_PADDING.len;
     }
 }
 
@@ -349,7 +352,9 @@ pub fn main() !void {
         pixel_seek += desc.channels;
     }
 
+    const used_len = @intFromPtr(enc.offset) - @intFromPtr(enc.data);
+
     const outfile = try std.fs.cwd().createFile(args[6], .{ .truncate = true });
     defer outfile.close();
-    _ = try outfile.writeAll(qoi_file);
+    _ = try outfile.writeAll(enc.data[0..used_len]);
 }
