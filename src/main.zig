@@ -12,14 +12,6 @@ const QoiEnum = enum(u8) {
     QOI_OP_RUN = 0xC0,
 };
 
-// const QOI_OP_RGB: u8 = 0xFE;
-// const QOI_OP_RGBA: u8 = 0xFF;
-
-// const QOI_OP_INDEX: u8 = 0x00;
-// const QOI_OP_DIFF: u8 = 0x40;
-// const QOI_OP_LUMA: u8 = 0x80;
-// const QOI_OP_RUN: u8 = 0xC0;
-
 const QOI_MAGIC = "qoif";
 const QOI_PADDING: *const [8]u8 = &.{ 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01 };
 
@@ -41,10 +33,6 @@ pub const QoiPixel = extern union {
     concatenated_pixel_values: u32,
 };
 
-comptime {
-    if (@sizeOf(QoiPixel) != @sizeOf(u8) * 4) @compileError("oh no! padding! how");
-}
-
 pub const QoiEnc = struct {
     buffer: [64]QoiPixel,
     prev_pixel: QoiPixel,
@@ -52,7 +40,7 @@ pub const QoiEnc = struct {
     pixel_offset: usize,
     len: usize,
 
-    data: [*]u8, // do these need to be multi pointers?
+    data: [*]u8,
     offset: [*]u8,
 
     run: u8,
@@ -98,17 +86,10 @@ pub fn qoiInitializePixel(pixel: *QoiPixel) void {
 }
 
 pub fn qoiGetIndexPos(pixel: QoiPixel) u6 {
-<<<<<<< HEAD
-    const r: u32 = pixel.vals.red;
-    const g: u32 = pixel.vals.green;
-    const b: u32 = pixel.vals.blue;
-    const a: u32 = pixel.vals.alpha;
-=======
     const r = pixel.vals.red;
     const g = pixel.vals.green;
     const b = pixel.vals.blue;
     const a = pixel.vals.alpha;
->>>>>>> ef91a23 (bugfix)
     return @truncate(r *% 3 +% g *% 5 +% b *% 7 +% a *% 11);
 }
 
@@ -117,14 +98,14 @@ fn qoiEncInit(desc: *QoiDesc, enc: *QoiEnc, data: [*]u8) bool {
         qoiInitializePixel(&enc.buffer[i]);
     }
 
-    enc.len = desc.width * desc.height; // don't need to cast to usize i think
+    enc.len = desc.width * desc.height;
     enc.pad = 0;
     enc.run = 0;
     enc.pixel_offset = 0;
 
     qoiSetPixelRGBA(&enc.prev_pixel, 0, 0, 0, 255);
 
-    enc.data = data; // might have to cast to *u8 or something
+    enc.data = data;
     enc.offset = enc.data + 14;
 
     return true;
@@ -196,7 +177,7 @@ fn qoiEncRGBA(enc: *QoiEnc, px: QoiPixel) void {
 }
 
 fn qoiEncDifference(enc: *QoiEnc, red_diff: i32, green_diff: i32, blue_diff: i32) void {
-    const green_diff_biased: u8 = @intCast(green_diff + 2); // could it matter that we are adding and then casting?
+    const green_diff_biased: u8 = @intCast(green_diff + 2);
     const red_diff_biased: u8 = @intCast(red_diff + 2);
     const blue_diff_biased: u8 = @intCast(blue_diff + 2);
 
@@ -225,9 +206,7 @@ fn qoiEncLuma(enc: *QoiEnc, green_diff: i8, dr_dg: i8, db_dg: i8) void {
 }
 
 fn qoiEncodeChunk(desc: *QoiDesc, enc: *QoiEnc, qoi_pixel_bytes: [*]u8) void {
-    // var cur_pixel_multi: [*]align(1) QoiPixel = @ptrCast(qoi_pixel_bytes);
-
-    var cur_pixel: QoiPixel = undefined; // might need to handle this differently
+    var cur_pixel: QoiPixel = undefined;
 
     if (desc.channels < 4) {
         cur_pixel.vals.alpha = 255;
@@ -318,11 +297,9 @@ pub fn main() !void {
     defer file.close();
 
     const image_size: usize = width * height * channels;
-    print("Image size: {d}\n", .{image_size});
 
     const bytes_read = try file.readToEndAlloc(allocator, std.math.maxInt(usize));
     defer allocator.free(bytes_read);
-    // print("Bytes read: {d}\n", .{bytes_read});
 
     if (image_size < bytes_read.len) {
         print("{d} bytes are required for {s}. Your file is too small at {d} bytes.\n", .{ image_size, args[1], bytes_read.len });
@@ -357,4 +334,5 @@ pub fn main() !void {
     const outfile = try std.fs.cwd().createFile(args[6], .{ .truncate = true });
     defer outfile.close();
     _ = try outfile.writeAll(enc.data[0..used_len]);
+    print("\x1b[32mSuccess!\x1b[0m\n\tOriginal:\t{d} bytes\n\tCompressed:\t{d} bytes\n", .{ image_size, used_len });
 }
