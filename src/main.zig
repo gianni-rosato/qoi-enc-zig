@@ -52,7 +52,7 @@ pub const QoiEnc = struct {
     pixel_offset: usize,
     len: usize,
 
-    data: [*]u8,
+    data: [*]u8, // do these need to be multi pointers?
     offset: [*]u8,
 
     run: u8,
@@ -97,7 +97,7 @@ pub fn qoiInitializePixel(pixel: *QoiPixel) void {
     qoiSetPixelRGBA(pixel, 0, 0, 0, 0);
 }
 
-pub fn qoiGetIndexPos(pixel: QoiPixel) u4 {
+pub fn qoiGetIndexPos(pixel: QoiPixel) u6 {
     const r: u32 = pixel.vals.red;
     const g: u32 = pixel.vals.green;
     const b: u32 = pixel.vals.blue;
@@ -106,30 +106,25 @@ pub fn qoiGetIndexPos(pixel: QoiPixel) u4 {
 }
 
 fn qoiEncInit(desc: *QoiDesc, enc: *QoiEnc, data: [*]u8) bool {
-    for (0..64) |elem| {
-        qoiInitializePixel(&enc.buffer[elem]);
+    for (0..64) |i| {
+        qoiInitializePixel(&enc.buffer[i]);
     }
 
-    enc.len = @as(usize, desc.width) * @as(usize, desc.height);
+    enc.len = desc.width * desc.height; // don't need to cast to usize i think
     enc.pad = 0;
     enc.run = 0;
     enc.pixel_offset = 0;
 
     qoiSetPixelRGBA(&enc.prev_pixel, 0, 0, 0, 255);
 
-    enc.data = data;
+    enc.data = data; // might have to cast to *u8 or something
     enc.offset = enc.data + 14;
 
     return true;
 }
 
 fn qoiEncDone(enc: *QoiEnc) bool {
-    if (enc.pixel_offset >= enc.len) {
-        return true;
-    } else {
-        return false;
-    }
-    // return (enc.pixel_offset >= enc.len);
+    return enc.pixel_offset >= enc.len;
 }
 
 fn qoiEncRun(enc: *QoiEnc) void {
@@ -165,7 +160,12 @@ fn qoiEncIndex(enc: *QoiEnc, index_pos: u8) void {
 }
 
 fn qoiEncRGB(enc: *QoiEnc, px: QoiPixel) void {
-    const tags = [_]u8{ @intFromEnum(QoiEnum.QOI_OP_RGB), px.vals.red, px.vals.green, px.vals.blue };
+    const tags = [4]u8{
+        @intFromEnum(QoiEnum.QOI_OP_RGB),
+        px.vals.red,
+        px.vals.green,
+        px.vals.blue,
+    };
 
     for (tags, 0..) |tag, i| {
         enc.offset[i] = tag;
@@ -175,7 +175,13 @@ fn qoiEncRGB(enc: *QoiEnc, px: QoiPixel) void {
 }
 
 fn qoiEncRGBA(enc: *QoiEnc, px: QoiPixel) void {
-    const tags = [_]u8{ @intFromEnum(QoiEnum.QOI_OP_RGBA), px.vals.red, px.vals.green, px.vals.blue, px.vals.alpha };
+    const tags = [5]u8{
+        @intFromEnum(QoiEnum.QOI_OP_RGBA),
+        px.vals.red,
+        px.vals.green,
+        px.vals.blue,
+        px.vals.alpha,
+    };
 
     for (tags, 0..) |tag, i| {
         enc.offset[i] = tag;
@@ -185,13 +191,19 @@ fn qoiEncRGBA(enc: *QoiEnc, px: QoiPixel) void {
 }
 
 fn qoiEncDifference(enc: *QoiEnc, red_diff: i32, green_diff: i32, blue_diff: i32) void {
-    const green_diff_biased: u8 = @intCast(green_diff + 2);
+    const green_diff_biased: u8 = @intCast(green_diff + 2); // could it matter that we are adding and then casting?
     const red_diff_biased: u8 = @intCast(red_diff + 2);
     const blue_diff_biased: u8 = @intCast(blue_diff + 2);
 
-    const tag: u8 = @intFromEnum(QoiEnum.QOI_OP_DIFF) | red_diff_biased << 4 | green_diff_biased << 2 | blue_diff_biased;
+    const tag: u8 =
+        @intFromEnum(QoiEnum.QOI_OP_DIFF) |
+        red_diff_biased << 4 |
+        green_diff_biased << 2 |
+        blue_diff_biased;
+
     enc.offset[0] = tag;
-    enc.offset += 1; // line 486 in C impl. Zig may not be doing pointer arithmetic
+
+    enc.offset += 1;
 }
 
 fn qoiEncLuma(enc: *QoiEnc, green_diff: i8, dr_dg: i8, db_dg: i8) void {
@@ -199,7 +211,7 @@ fn qoiEncLuma(enc: *QoiEnc, green_diff: i8, dr_dg: i8, db_dg: i8) void {
     const dr_dg_biased: u8 = @intCast(dr_dg + 8);
     const db_dg_biased: u8 = @intCast(db_dg + 8);
 
-    const tags: [2]u8 = .{ @intFromEnum(QoiEnum.QOI_OP_LUMA) | green_diff_biased, dr_dg_biased << 4 | db_dg_biased };
+    const tags = [2]u8{ @intFromEnum(QoiEnum.QOI_OP_LUMA) | green_diff_biased, dr_dg_biased << 4 | db_dg_biased };
 
     for (tags, 0..) |tag, i| {
         enc.offset[i] = tag;
@@ -211,7 +223,7 @@ fn qoiEncLuma(enc: *QoiEnc, green_diff: i8, dr_dg: i8, db_dg: i8) void {
 fn qoiEncodeChunk(desc: *QoiDesc, enc: *QoiEnc, qoi_pixel_bytes: [*]u8) void {
     // var cur_pixel_multi: [*]align(1) QoiPixel = @ptrCast(qoi_pixel_bytes);
 
-    var cur_pixel: QoiPixel = undefined;
+    var cur_pixel: QoiPixel = undefined; // might need to handle this differently
 
     if (desc.channels < 4) {
         cur_pixel.vals.alpha = 255;
@@ -220,7 +232,7 @@ fn qoiEncodeChunk(desc: *QoiDesc, enc: *QoiEnc, qoi_pixel_bytes: [*]u8) void {
         @memcpy(&cur_pixel.channels, qoi_pixel_bytes[0..4]);
     }
 
-    const index_pos: u4 = qoiGetIndexPos(cur_pixel);
+    const index_pos: u6 = qoiGetIndexPos(cur_pixel);
 
     if (qoiComparePixel(cur_pixel, enc.prev_pixel, desc.channels)) {
         if (enc.run + 1 >= 62 or enc.pixel_offset >= enc.len) {
@@ -291,9 +303,6 @@ pub fn main() !void {
         _ = try printHelp();
         return;
     }
-
-    _ = QoiEnc;
-    _ = QoiDesc;
 
     const width: u32 = try parseInt(u32, args[2], 10);
     const height: u32 = try parseInt(u32, args[3], 10);
