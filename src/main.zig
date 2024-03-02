@@ -15,7 +15,18 @@ const QoiEnum = enum(u8) {
 const QOI_MAGIC = "qoif";
 const QOI_PADDING: *const [8]u8 = &.{ 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01 };
 
-pub const QoiDesc = struct {
+const QoiPixel = extern union {
+    vals: extern struct {
+        red: u8,
+        green: u8,
+        blue: u8,
+        alpha: u8,
+    },
+    channels: [4]u8,
+    concatenated_pixel_values: u32,
+};
+
+const QoiDesc = struct {
     width: u32 = 0,
     height: u32 = 0,
     channels: u8 = 0,
@@ -31,41 +42,9 @@ pub const QoiDesc = struct {
         dest[12] = self.channels;
         dest[13] = self.colorspace;
     }
-    fn qoiEncInit(self: QoiDesc, enc: *QoiEnc, data: [*]u8) !void {
-        for (0..64) |i| {
-            enc.buffer[i].vals.red = 0;
-            enc.buffer[i].vals.green = 0;
-            enc.buffer[i].vals.blue = 0;
-            enc.buffer[i].vals.red = 255;
-        }
-
-        enc.len = self.width * self.height;
-        enc.pad = 0;
-        enc.run = 0;
-        enc.pixel_offset = 0;
-
-        enc.prev_pixel.vals.red = 0;
-        enc.prev_pixel.vals.green = 0;
-        enc.prev_pixel.vals.blue = 0;
-        enc.prev_pixel.vals.alpha = 255;
-
-        enc.data = data;
-        enc.offset = enc.data + 14;
-    }
 };
 
-pub const QoiPixel = extern union {
-    vals: extern struct {
-        red: u8,
-        green: u8,
-        blue: u8,
-        alpha: u8,
-    },
-    channels: [4]u8,
-    concatenated_pixel_values: u32,
-};
-
-pub const QoiEnc = struct {
+const QoiEnc = struct {
     buffer: [64]QoiPixel,
     prev_pixel: QoiPixel,
 
@@ -78,6 +57,27 @@ pub const QoiEnc = struct {
     run: u8,
     pad: u24,
 
+    fn qoiEncInit(self: *QoiEnc, desc: QoiDesc, data: [*]u8) !void {
+        for (0..64) |i| {
+            self.buffer[i].vals.red = 0;
+            self.buffer[i].vals.green = 0;
+            self.buffer[i].vals.blue = 0;
+            self.buffer[i].vals.red = 255;
+        }
+
+        self.len = desc.width * desc.height;
+        self.pad = 0;
+        self.run = 0;
+        self.pixel_offset = 0;
+
+        self.prev_pixel.vals.red = 0;
+        self.prev_pixel.vals.green = 0;
+        self.prev_pixel.vals.blue = 0;
+        self.prev_pixel.vals.alpha = 255;
+
+        self.data = data;
+        self.offset = self.data + 14;
+    }
     fn qoiEncRun(self: *QoiEnc) void {
         const tag: u8 = @intFromEnum(QoiEnum.QOI_OP_RUN) | (self.run - 1);
         self.run = 0;
@@ -138,9 +138,50 @@ pub const QoiEnc = struct {
 };
 
 fn printHelp() !void {
-    print("Example usage: qoi-zig <filename> <width> <height> <channels> <colorspace> <output>\n", .{});
-    print("Channels:\n3: No transparency\n4: Transparency\n\n", .{});
-    print("Colorspace:\n0: sRGB with linear alpha\n1: Linear RGB\n", .{});
+    print("Freestanding QOI Encoder in \x1b[33mZig\x1b[0m\n", .{});
+    print("Example usage: qoi-zig [input.pam] [output] [colorspace]\n", .{});
+    print("Colorspace:\n\t0: sRGB w/ Linear Alpha\n\t1: Linear RGB\n", .{});
+}
+
+fn parsePamHeader(bytes_read: []u8, width: *u32, height: *u32, channels: *u8) !usize {
+    var header_tokens = std.mem.tokenizeAny(u8, bytes_read[0..], " \n\r");
+    var i: u4 = 0;
+    while (true) : (i += 1) {
+        const token = header_tokens.next();
+        if (token == null or token.?.len == 0) break;
+        switch (i) {
+            2 => width.* = try parseInt(u32, token.?, 10),
+            4 => height.* = try parseInt(u32, token.?, 10),
+            6 => channels.* = try parseInt(u8, token.?, 10),
+            8 => if (try parseInt(u16, token.?, 10) > 255) return error.OutOfBounds else {},
+            else => {},
+        }
+    }
+    print("Dimensions: {d}x{d} | \x1b[31mR\x1b[0m\x1b[32mG\x1b[0m\x1b[34mB\x1b[0m", .{ width.*, height.* });
+    if (channels.* > 3) print("\x1b[37mA\x1b[0m", .{});
+    print("\n", .{});
+    var offset: usize = 59;
+
+    if (channels.* > 3) offset += 6;
+    if (width.* > 9999) {
+        offset += 4;
+    } else if (width.* > 999) {
+        offset += 3;
+    } else if (width.* > 99) {
+        offset += 2;
+    } else if (width.* > 9) {
+        offset += 1;
+    }
+    if (height.* > 9999) {
+        offset += 4;
+    } else if (height.* > 999) {
+        offset += 3;
+    } else if (height.* > 99) {
+        offset += 2;
+    } else if (height.* > 9) {
+        offset += 1;
+    }
+    return offset;
 }
 
 fn qoiComparePixel(pixel1: QoiPixel, pixel2: QoiPixel, channels: u8) bool {
@@ -235,30 +276,41 @@ pub fn main() !void {
 
     if (std.mem.eql(u8, args[1], "-h") or
         std.mem.eql(u8, args[1], "--help") or
-        args.len < 7 or
+        args.len < 4 or
+        args.len > 4 or
         args[1].len < 1)
     {
         _ = try printHelp();
         return;
     }
 
-    const width: u32 = try parseInt(u32, args[2], 10);
-    const height: u32 = try parseInt(u32, args[3], 10);
-    const channels: u8 = try parseInt(u8, args[4], 10);
-    const colorspace: u8 = try parseInt(u8, args[5], 10);
+    var width: u32 = undefined;
+    var height: u32 = undefined;
+    var channels: u8 = undefined;
+    const colorspace: u8 = try parseInt(u8, args[3], 10);
 
-    print("Opening file: {s} ...\n", .{args[1]});
+    print("Opening {s} ... ", .{args[1]});
 
     const file = try std.fs.cwd().openFile(args[1], .{ .mode = .read_only });
     defer file.close();
 
-    const image_size: usize = width * height * channels;
-
     const bytes_read = try file.readToEndAlloc(allocator, std.math.maxInt(usize));
     defer allocator.free(bytes_read);
+    var offset: usize = 0;
 
-    if (image_size < bytes_read.len) {
-        print("{d} bytes are required for {s}. Your file is too small at {d} bytes.\n", .{ image_size, args[1], bytes_read.len });
+    if (std.mem.eql(u8, bytes_read[0..2], "P7")) {
+        print("file is a PAM\n", .{});
+        offset = try parsePamHeader(bytes_read[0..72], &width, &height, &channels);
+    } else {
+        print("\n\x1b[31mInvalid Input: Input file does not appear to be a compatible PAM.\x1b[0m\n", .{});
+        print("If your PAM input contains comments in the header, please strip them.\n", .{});
+        return error.InvalidInput;
+    }
+
+    const image_size: usize = width * height * channels;
+    if (image_size > bytes_read.len - offset) {
+        print("\x1b[31mInvalid Input: Image size is larger than the file size.\x1b[0m\n", .{});
+        return error.InvalidInput;
     }
 
     var desc = QoiDesc.qoiSetEverything(width, height, channels, colorspace);
@@ -267,14 +319,14 @@ pub fn main() !void {
     var qoi_file = try allocator.alloc(u8, qoi_file_size);
     defer allocator.free(qoi_file);
 
-    print("Writing {s} ...\n", .{args[6]});
+    print("Writing {s} ... ", .{args[2]});
 
     desc.writeQoiHeader(qoi_file[0..14]);
 
-    var pixel_seek: [*]u8 = bytes_read.ptr;
+    var pixel_seek: [*]u8 = bytes_read[offset..].ptr;
     var enc: QoiEnc = undefined;
 
-    try desc.qoiEncInit(&enc, qoi_file.ptr);
+    try enc.qoiEncInit(desc, qoi_file.ptr);
 
     while (!(enc.pixel_offset >= enc.len)) {
         qoiEncodeChunk(&desc, &enc, pixel_seek);
@@ -283,8 +335,16 @@ pub fn main() !void {
 
     const used_len = @intFromPtr(enc.offset) - @intFromPtr(enc.data);
 
-    const outfile = try std.fs.cwd().createFile(args[6], .{ .truncate = true });
+    const outfile = try std.fs.cwd().createFile(args[2], .{ .truncate = true });
     defer outfile.close();
     _ = try outfile.writeAll(enc.data[0..used_len]);
-    print("\x1b[32mSuccess!\x1b[0m\n\tOriginal:\t{d} bytes\n\tCompressed:\t{d} bytes\n", .{ image_size, used_len });
+    print("\x1b[32mSuccess!\x1b[0m\n\tOriginal:\t{d} bytes\n\tCompressed:\t{d} bytes ", .{ image_size + offset, used_len });
+    if ((image_size + offset) > used_len) {
+        const used_len_flt: f64 = @floatFromInt(used_len);
+        const image_size_flt: f64 = @floatFromInt(image_size + offset);
+        const percent_dec: f64 = 100.0 - ((used_len_flt / image_size_flt) * 100.0);
+        print("(\x1b[33m{d:.2}%\x1b[0m smaller)\n", .{percent_dec});
+    } else {
+        print("\n", .{});
+    }
 }
