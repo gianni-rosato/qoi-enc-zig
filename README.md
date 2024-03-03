@@ -71,7 +71,7 @@ Encode `plants.pam` in sRGB with linear alpha:
 qoi-zig plants.pam plants.qoi 0
 ```
 
-Encode `squoosh.pam` in linear RGB (even though this image is meant to be encoded in sRGB w/ linear alpha):
+Encode `photograph.pam` in linear RGB (even though this image is meant to be encoded in sRGB w/ linear alpha):
 
 ```bash
 qoi-zig photograph.pam photograph.qoi 1
