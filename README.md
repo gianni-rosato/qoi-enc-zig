@@ -1,8 +1,10 @@
 # QOI Image Encoder in Zig
 
-This Zig program encodes RGB images into the Quite OK Image Format (QOI). It is a freestanding implementation, existing entirely in one file. The QOI format is a simple, lossless image format designed for fast encoding and decoding.
+This Zig program encodes a subset of Portable Arbitrary Map (PAM) images into the Quite OK Image Format (QOI). It is a freestanding implementation, existing entirely in one file. The QOI format is a simple, lossless image format designed for fast encoding and decoding.
 
-![qoi-logo-white](https://ninja.dog/1nzHoy.svg)
+<div align="center">
+<img src="https://ninja.dog/1nzHoy.svg" alt="QOI Logo" width=230/>
+</div>
 
 ## Program Details
 
@@ -15,58 +17,73 @@ I wrote this mostly as a learning exercise, so I hope that the details below can
 - `QoiPixel`: Represents a pixel in a QOI image. It can be accessed as individual color channels or as a single 32-bit integer.
 - `QoiEnc`: A structure that holds the state of the QOI encoder as it traverses the input file.
 
+## Building
+
+In order to build this program, you will need to have the latest version of the Zig programming language (at least version `0.12.0-dev.2922`) installed on your system as well as `git`. You can find instructions for installing Zig on the [official website](https://ziglang.org/). Once that is set up, follow the steps below for building the `qoi-zig` binary:
+
+```bash
+git clone https://github.com/gianni-rosato/qoi-enc-zig # Clone the repo
+cd qoi-enc-zig # Enter the directory
+zig build # Build the program
+```
+
+*Note: A previous version of this program encoded RGB source images, and had a smaller codebase. If you'd like to build that verion, simply run `git reset --hard 36317c52896d8642ae10c3c18774991f4f68bf22` in the cloned directory before running `zig build`. The old README.md will also be present in the reset directory if you would like to see the old usage instructions.*
+
 ## Usage
 
 The program is run from the command line with the following arguments:
 
-```
-qoi_enc <filename> <width> <height> <channels> <colorspace> <output>
+```bash
+qoi-zig [input.pam] [output] [colorspace]
 ```
 
-- `<filename>`: The path to the input RGB image file.
-- `<width>` and `<height>`: The dimensions of the image.
-- `<channels>`: The number of color channels in the image. Use `3` for RGB and `4` for RGBA.
-- `<colorspace>`: The colorspace of the image. Use `0` for sRGB with linear alpha and `1` for linear RGB.
-- `<output>`: The path to the output QOI image file.
+- `input.pam`: The input PAM image file to encode.
+- `output`: The output QOI image file to create.
+- `colorspace`: The colorspace of the image. Use `0` for sRGB with linear alpha and `1` for linear RGB.
 
 If the input file is too small for the specified image dimensions & channels, an error message is printed.
 
+## Creating PAM Files
+
+If you're just interested in testing this program, you can use the PAM files in the `examples/` directory. If you want to create your own PAM files, you can use [FFmpeg](https://wiki.x266.mov/docs/utilities/ffmpeg) like so:
+
+Create an 8-bit RGB PAM file from an input image:
+
+```bash
+ffmpeg -i [input] -pix_fmt rgb24 -c pam -update 1 -f image2 output_rgb.pam
+```
+
+Create an 8-bit RGBA PAM file from an input image:
+
+```bash
+ffmpeg -i [input] -pix_fmt rgba -c pam -update 1 -f image2 output_rgba.pam
+```
+
+Note: This program's encoder will only encode 8-bit PAM files with 3 or 4 color channels. It will not encode 16-bit PAM files or PAM files with more than 4 color channels.
+
 ## Examples
 
-There are some RGB examples provided in the `examples/` directory. You can use these to test the program and see how it works.
+There are some compatible PAM examples provided in the `examples/` directory. You can use these to test the program and see how it works.
 
-Encode `foo.rgb` with dimensions 512x512:
-
-```bash
-qoi-zig foo.rgb 512 512 3 0 foo.qoi
-```
-Encode `squoosh.rgb` with dimensions 600x600:
+Encode `plants.pam` in sRGB with linear alpha:
 
 ```bash
-qoi-zig squoosh.rgb 600 600 3 0 squoosh.qoi
+qoi-zig plants.pam plants.qoi 0
 ```
 
-This will create a QOI image file from the input RGB image file. The original and compressed file sizes are printed upon successful encoding.
+Encode `squoosh.pam` in linear RGB (even though this image is meant to be encoded in sRGB w/ linear alpha):
 
-This program does not perform any error checking on the input file. It is assumed that the file is a valid RGB or RGBA image with the specified dimensions and colorspace. Incorrect input can lead to unexpected results or program crashes. Always ensure that your input data is correct before running the program.
+```bash
+qoi-zig photograph.pam photograph.qoi 1
+```
+
+These commands will create QOI image files from the inputs shown. The original and compressed file sizes are printed upon successful encoding.
+
+This program does not perform any error checking on the input file. It is assumed that the file is a compatible PAM file. Incorrect input can lead to unexpected results or program crashes; always ensure that your input data is correct before running the program.
 
 ## Dependencies
 
 This program requires the Zig programming language, at least version `0.12.0-dev.2922`. It also uses the standard library provided with Zig. No other dependencies are required.
-
-## Building
-
-To build the program, navigate to the directory `qoi-enc-zig` and run:
-
-```
-zig build
-```
-
-This will create an executable file `qoi-zig` in `zig-out/bin/`. You can then run this file with the appropriate arguments to encode your images like so:
-
-```bash
-./zig-out/bin/qoi-zig examples/squoosh.rgb 600 600 3 0 squoosh.qoi
-```
 
 ## License
 
