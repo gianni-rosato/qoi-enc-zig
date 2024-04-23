@@ -1,6 +1,8 @@
 const std = @import("std");
 const print = std.debug.print;
 const parseInt = std.fmt.parseInt;
+const writeInt = std.mem.writeInt;
+const eql = std.mem.eql;
 
 const QoiEnum = enum(u8) {
     QOI_OP_RGB = 0xFE,
@@ -37,8 +39,8 @@ const QoiDesc = struct {
     }
     fn writeQoiHeader(self: QoiDesc, dest: *[14]u8) void {
         @memcpy(dest[0..4], QOI_MAGIC);
-        std.mem.writeInt(u32, dest[4..8], self.width, .big);
-        std.mem.writeInt(u32, dest[8..12], self.height, .big);
+        writeInt(u32, dest[4..8], self.width, .big);
+        writeInt(u32, dest[8..12], self.height, .big);
         dest[12] = self.channels;
         dest[13] = self.colorspace;
     }
@@ -160,46 +162,30 @@ fn parsePamHeader(bytes_read: []u8, width: *u32, height: *u32, channels: *u8) !u
     print("Dimensions: {d}x{d} | \x1b[31mR\x1b[0m\x1b[32mG\x1b[0m\x1b[34mB\x1b[0m", .{ width.*, height.* });
     if (channels.* > 3) print("\x1b[37mA\x1b[0m", .{});
     print("\n", .{});
-    var offset: usize = 59;
 
+    var offset: usize = 59;
     if (channels.* > 3) offset += 6;
-    if (width.* > 9999) {
-        offset += 4;
-    } else if (width.* > 999) {
-        offset += 3;
-    } else if (width.* > 99) {
-        offset += 2;
-    } else if (width.* > 9) {
-        offset += 1;
-    }
-    if (height.* > 9999) {
-        offset += 4;
-    } else if (height.* > 999) {
-        offset += 3;
-    } else if (height.* > 99) {
-        offset += 2;
-    } else if (height.* > 9) {
-        offset += 1;
-    }
+
+    offset += switch (width.*) {
+        0...9 => 0,
+        10...99 => 1,
+        100...999 => 2,
+        1000...9999 => 3,
+        else => 4,
+    };
+    offset += switch (height.*) {
+        0...9 => 0,
+        10...99 => 1,
+        100...999 => 2,
+        1000...9999 => 3,
+        else => 4,
+    };
+
     return offset;
 }
 
-fn qoiComparePixel(pixel1: QoiPixel, pixel2: QoiPixel, channels: u8) bool {
-    const p1: QoiPixel = if (channels < 4) .{ .vals = .{
-        .red = pixel1.vals.red,
-        .green = pixel1.vals.green,
-        .blue = pixel1.vals.blue,
-        .alpha = 0,
-    } } else pixel1;
-
-    const p2: QoiPixel = if (channels < 4) .{ .vals = .{
-        .red = pixel2.vals.red,
-        .green = pixel2.vals.green,
-        .blue = pixel2.vals.blue,
-        .alpha = 0,
-    } } else pixel2;
-
-    return p1.concatenated_pixel_values == p2.concatenated_pixel_values;
+fn qoiComparePixel(pixel1: QoiPixel, pixel2: QoiPixel) bool {
+    return pixel1.concatenated_pixel_values == pixel2.concatenated_pixel_values;
 }
 
 fn qoiEncodeChunk(desc: *QoiDesc, enc: *QoiEnc, qoi_pixel_bytes: [*]u8) void {
@@ -214,16 +200,12 @@ fn qoiEncodeChunk(desc: *QoiDesc, enc: *QoiEnc, qoi_pixel_bytes: [*]u8) void {
 
     const index_pos: u6 = @truncate(cur_pixel.vals.red *% 3 +% cur_pixel.vals.green *% 5 +% cur_pixel.vals.blue *% 7 +% cur_pixel.vals.alpha *% 11);
 
-    if (qoiComparePixel(cur_pixel, enc.prev_pixel, desc.channels)) {
+    if (qoiComparePixel(cur_pixel, enc.prev_pixel)) {
         enc.run += 1;
-        if (enc.run >= 62 or enc.pixel_offset >= enc.len) {
-            enc.qoiEncRun();
-        }
+        if (enc.run >= 62 or enc.pixel_offset >= enc.len) enc.qoiEncRun();
     } else {
-        if (enc.run > 0) {
-            enc.qoiEncRun();
-        }
-        if (qoiComparePixel(enc.buffer[index_pos], cur_pixel, 4)) {
+        if (enc.run > 0) enc.qoiEncRun();
+        if (qoiComparePixel(enc.buffer[index_pos], cur_pixel)) {
             enc.qoiEncIndex(index_pos);
         } else {
             enc.buffer[index_pos] = cur_pixel;
@@ -274,8 +256,8 @@ pub fn main() !void {
     const args = try std.process.argsAlloc(allocator);
     defer std.process.argsFree(allocator, args);
 
-    if (std.mem.eql(u8, args[1], "-h") or
-        std.mem.eql(u8, args[1], "--help") or
+    if (eql(u8, args[1], "-h") or
+        eql(u8, args[1], "--help") or
         args.len < 4 or
         args.len > 4 or
         args[1].len < 1)
@@ -298,7 +280,7 @@ pub fn main() !void {
     defer allocator.free(bytes_read);
     var offset: usize = 0;
 
-    if (std.mem.eql(u8, bytes_read[0..2], "P7")) {
+    if (eql(u8, bytes_read[0..2], "P7")) {
         print("file is a PAM\n", .{});
         offset = try parsePamHeader(bytes_read[0..72], &width, &height, &channels);
     } else {

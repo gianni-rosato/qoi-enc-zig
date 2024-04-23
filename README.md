@@ -10,12 +10,57 @@ This Zig program encodes a subset of Portable Arbitrary Map (PAM) images into th
 
 I wrote this mostly as a learning exercise, so I hope that the details below can help you learn from this implementation as well. I was heavily inspired by the [Simplified QOI Codec Library](https://github.com/Aftersol/Simplified-QOI-Codec), a one header file library for encoding and decoding QOI files written in C.
 
-### Data Structures
+### Benchmarks
 
-- `QoiEnum`: Opcodes used in the QOI format.
-- `QoiDesc`: Describes the properties of a QOI image, including its width, height, number of color channels, and colorspace.
-- `QoiPixel`: Represents a pixel in a QOI image. It can be accessed as individual color channels or as a single 32-bit integer.
-- `QoiEnc`: A structure that holds the state of the QOI encoder as it traverses the input file.
+These are some rudimentary, unscientific benchmarks performed on a Linux system running a Core i7-13700k with the [`poop`](https://github.com/andrewrk/poop) benchmarking utility. The `qoi-zig` binary was built in ReleaseFast mode, and we're using FFmpeg n6.1.1 from the Arch repos.
+
+1. This first benchmark was run on a `big2.pam` image that I haven't included in the `examples` directory because it is rather large at 59.8 MB for a massive 5468x3644 image. I'll link a lossless JPEG-XL encode [here](https://files.catbox.moe/80aib5.jxl) if you'd like to take a look for yourself.
+```bash
+13700k :: ~ » poop -d 25000 'ffmpeg -y -i big2.pam -frames:v 1 big2.qoi' 'qoi-zig big2.pam big2.qoi 0'
+Benchmark 1 (104 runs): ffmpeg -y -i big2.pam -frames:v 1 big2.qoi
+  measurement          mean ± σ            min … max           outliers         delta
+  wall_time           242ms ± 8.53ms     229ms …  277ms          2 ( 2%)        0%
+  peak_rss            244MB ±  261KB     243MB …  245MB          7 ( 7%)        0%
+  cpu_cycles          945M  ± 10.2M      877M  …  961M           9 ( 9%)        0%
+  instructions       2.11G  ± 17.2M     1.96G  … 2.12G          13 (13%)        0%
+  cache_references   5.66M  ±  432K     3.88M  … 5.98M          23 (22%)        0%
+  cache_misses       3.42M  ±  320K     2.04M  … 3.66M          13 (13%)        0%
+  branch_misses      15.7M  ±  136K     14.5M  … 15.8M          13 (13%)        0%
+Benchmark 2 (128 runs): qoi-zig big2.pam big2.qoi 0
+  measurement          mean ± σ            min … max           outliers         delta
+  wall_time           196ms ± 3.80ms     185ms …  211ms          6 ( 5%)        ⚡- 18.7% ±  0.7%
+  peak_rss            119MB ±  654KB     118MB …  121MB          0 ( 0%)        ⚡- 51.0% ±  0.1%
+  cpu_cycles          756M  ± 3.83M      741M  …  772M           8 ( 6%)        ⚡- 20.0% ±  0.2%
+  instructions       1.82G  ± 3.34M     1.79G  … 1.82G          11 ( 9%)        ⚡- 13.7% ±  0.1%
+  cache_references   6.07M  ±  109K     5.23M  … 6.15M          12 ( 9%)        💩+  7.1% ±  1.4%
+  cache_misses       2.22M  ± 68.3K     2.07M  … 2.57M           6 ( 5%)        ⚡- 35.2% ±  1.7%
+  branch_misses      15.2M  ± 48.5K     14.9M  … 15.4M           6 ( 5%)        ⚡-  3.3% ±  0.2%
+```
+
+2. This benchmark was performed on the `qoi_logo.pam` image included in this repo's `examples` directory.
+```bash
+13700k :: ~ » poop 'ffmpeg -y -i qoi_logo.pam -frames:v 1 qoi_logo.qoi' 'qoi-zig qoi_logo.pam qoi_logo.qoi 0'
+Benchmark 1 (178 runs): ffmpeg -y -i qoi_logo.pam -frames:v 1 qoi_logo.qoi
+  measurement          mean ± σ            min … max           outliers         delta
+  wall_time          28.1ms ± 3.17ms    25.5ms … 42.5ms         17 (10%)        0%
+  peak_rss           54.3MB ±  311KB    53.5MB … 55.0MB          0 ( 0%)        0%
+  cpu_cycles         91.0M  ± 2.03M     72.5M  … 93.6M          11 ( 6%)        0%
+  instructions        159M  ± 3.45M      124M  …  161M          21 (12%)        0%
+  cache_references    675K  ± 27.4K      534K  …  765K           9 ( 5%)        0%
+  cache_misses        226K  ± 16.7K      133K  …  254K           4 ( 2%)        0%
+  branch_misses       647K  ± 15.3K      506K  …  675K          19 (11%)        0%
+Benchmark 2 (3107 runs): qoi-zig qoi_logo.pam qoi_logo.qoi 0
+  measurement          mean ± σ            min … max           outliers         delta
+  wall_time          1.55ms ±  537us     227us … 11.6ms        262 ( 8%)        ⚡- 94.5% ±  0.5%
+  peak_rss            844KB ± 28.3KB     635KB …  848KB         87 ( 3%)        ⚡- 98.4% ±  0.0%
+  cpu_cycles         66.1K  ± 59.7K        0   …  186K           0 ( 0%)        ⚡- 99.9% ±  0.1%
+  instructions        142K  ±  137K        0   …  281K           0 ( 0%)        ⚡- 99.9% ±  0.1%
+  cache_references    447   ±  296         0   … 1.58K          23 ( 1%)        ⚡- 99.9% ±  0.1%
+  cache_misses       2.69   ± 4.68         0   …   93          197 ( 6%)        ⚡-100.0% ±  0.3%
+  branch_misses       666   ±  624         0   … 1.70K           0 ( 0%)        ⚡- 99.9% ±  0.1%
+```
+
+FFmpeg is pretty fast, but it is evident there is more going on under the hood there. Even so, we'll take what we can get!
 
 ## Building
 
@@ -24,7 +69,7 @@ In order to build this program, you will need to have the latest version of the 
 ```bash
 git clone https://github.com/gianni-rosato/qoi-enc-zig # Clone the repo
 cd qoi-enc-zig # Enter the directory
-zig build # Build the program
+zig build -Doptimize=ReleaseFast # Build the program
 ```
 
 *Note: A previous version of this program encoded RGB source images, and had a smaller codebase. If you'd like to build that verion, simply run `git reset --hard 36317c52896d8642ae10c3c18774991f4f68bf22` in the cloned directory before running `zig build`. The old README.md will also be present in the reset directory if you would like to see the old usage instructions.*
@@ -83,7 +128,7 @@ This program does not perform any error checking on the input file. It is assume
 
 ## Dependencies
 
-This program requires the Zig programming language, at least version `0.12.0-dev.2922`. It also uses the standard library provided with Zig. No other dependencies are required.
+This program requires the Zig programming language, at least version `0.12.0`. It also uses the standard library provided with Zig. No other dependencies are required.
 
 ## License
 
