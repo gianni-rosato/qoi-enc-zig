@@ -137,6 +137,15 @@ const QoiEnc = struct {
 
         enc.offset += 1;
     }
+    fn finishEncodeChunk(enc: *QoiEnc, cur_pixel: QoiPixel) void {
+        enc.prev_pixel = cur_pixel;
+        enc.pixel_offset += 1;
+
+        if (enc.pixel_offset >= enc.len) {
+            @memcpy(enc.offset[0..QOI_PADDING.len], QOI_PADDING);
+            enc.offset += QOI_PADDING.len;
+        }
+    }
 };
 
 fn printHelp() !void {
@@ -198,52 +207,53 @@ fn qoiEncodeChunk(desc: *QoiDesc, enc: *QoiEnc, qoi_pixel_bytes: [*]u8) void {
         @memcpy(&cur_pixel.channels, qoi_pixel_bytes[0..4]);
     }
 
-    const index_pos: u6 = @truncate(cur_pixel.vals.red *% 3 +% cur_pixel.vals.green *% 5 +% cur_pixel.vals.blue *% 7 +% cur_pixel.vals.alpha *% 11);
-
     if (qoiComparePixel(cur_pixel, enc.prev_pixel)) {
         enc.run += 1;
         if (enc.run >= 62 or enc.pixel_offset >= enc.len) enc.qoiEncRun();
+        enc.finishEncodeChunk(cur_pixel);
+        return;
+    }
+
+    if (enc.run > 0) enc.qoiEncRun();
+
+    const index_pos: u6 = @truncate(cur_pixel.vals.red *% 3 +% cur_pixel.vals.green *% 5 +% cur_pixel.vals.blue *% 7 +% cur_pixel.vals.alpha *% 11);
+
+    if (qoiComparePixel(enc.buffer[index_pos], cur_pixel)) {
+        enc.qoiEncIndex(index_pos);
+        enc.finishEncodeChunk(cur_pixel);
+        return;
+    }
+
+    enc.buffer[index_pos] = cur_pixel;
+
+    if (desc.channels > 3 and cur_pixel.vals.alpha != enc.prev_pixel.vals.alpha) {
+        enc.qoiEncFullColor(cur_pixel, desc.channels);
+        enc.finishEncodeChunk(cur_pixel);
+        return;
+    }
+
+    const red_diff: i32 = @as(i32, cur_pixel.vals.red) - @as(i32, enc.prev_pixel.vals.red);
+    const green_diff: i32 = @as(i32, cur_pixel.vals.green) - @as(i32, enc.prev_pixel.vals.green);
+    const blue_diff: i32 = @as(i32, cur_pixel.vals.blue) - @as(i32, enc.prev_pixel.vals.blue);
+
+    const dr_dg: i32 = red_diff - green_diff;
+    const db_dg: i32 = blue_diff - green_diff;
+
+    if (red_diff >= -2 and red_diff <= 1 and
+        green_diff >= -2 and green_diff <= 1 and
+        blue_diff >= -2 and blue_diff <= 1)
+    {
+        enc.qoiEncDifference(@intCast(red_diff), @intCast(green_diff), @intCast(blue_diff));
+    } else if (dr_dg >= -8 and dr_dg <= 7 and
+        green_diff >= -32 and green_diff <= 31 and
+        db_dg >= -8 and db_dg <= 7)
+    {
+        enc.qoiEncLuma(@intCast(green_diff), @intCast(dr_dg), @intCast(db_dg));
     } else {
-        if (enc.run > 0) enc.qoiEncRun();
-        if (qoiComparePixel(enc.buffer[index_pos], cur_pixel)) {
-            enc.qoiEncIndex(index_pos);
-        } else {
-            enc.buffer[index_pos] = cur_pixel;
-
-            if (desc.channels > 3 and cur_pixel.vals.alpha != enc.prev_pixel.vals.alpha) {
-                enc.qoiEncFullColor(cur_pixel, desc.channels);
-            } else {
-                const red_diff: i32 = @as(i32, cur_pixel.vals.red) - @as(i32, enc.prev_pixel.vals.red);
-                const green_diff: i32 = @as(i32, cur_pixel.vals.green) - @as(i32, enc.prev_pixel.vals.green);
-                const blue_diff: i32 = @as(i32, cur_pixel.vals.blue) - @as(i32, enc.prev_pixel.vals.blue);
-
-                const dr_dg: i32 = red_diff - green_diff;
-                const db_dg: i32 = blue_diff - green_diff;
-
-                if (red_diff >= -2 and red_diff <= 1 and
-                    green_diff >= -2 and green_diff <= 1 and
-                    blue_diff >= -2 and blue_diff <= 1)
-                {
-                    enc.qoiEncDifference(@intCast(red_diff), @intCast(green_diff), @intCast(blue_diff));
-                } else if (dr_dg >= -8 and dr_dg <= 7 and
-                    green_diff >= -32 and green_diff <= 31 and
-                    db_dg >= -8 and db_dg <= 7)
-                {
-                    enc.qoiEncLuma(@intCast(green_diff), @intCast(dr_dg), @intCast(db_dg));
-                } else {
-                    enc.qoiEncFullColor(cur_pixel, desc.channels);
-                }
-            }
-        }
+        enc.qoiEncFullColor(cur_pixel, desc.channels);
     }
 
-    enc.prev_pixel = cur_pixel;
-    enc.pixel_offset += 1;
-
-    if (enc.pixel_offset >= enc.len) {
-        @memcpy(enc.offset[0..QOI_PADDING.len], QOI_PADDING);
-        enc.offset += QOI_PADDING.len;
-    }
+    enc.finishEncodeChunk(cur_pixel);
 }
 
 pub fn main() !void {
