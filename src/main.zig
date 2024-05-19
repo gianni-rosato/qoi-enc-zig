@@ -58,10 +58,8 @@ const QoiEnc = struct {
 
     fn qoiEncInit(self: *QoiEnc, desc: QoiDesc, data: [*]u8) !void {
         for (0..64) |i| {
-            self.buffer[i].vals.red = 0;
-            self.buffer[i].vals.green = 0;
-            self.buffer[i].vals.blue = 0;
-            self.buffer[i].vals.red = 255;
+            for (0..3) |j| self.buffer[i].channels[j] = 0;
+            self.buffer[i].vals.alpha = 255;
         }
 
         self.len = desc.width * desc.height;
@@ -69,9 +67,7 @@ const QoiEnc = struct {
         self.run = 0;
         self.pixel_offset = 0;
 
-        self.prev_pixel.vals.red = 0;
-        self.prev_pixel.vals.green = 0;
-        self.prev_pixel.vals.blue = 0;
+        for (0..3) |i| self.prev_pixel.channels[i] = 0;
         self.prev_pixel.vals.alpha = 255;
 
         self.data = data;
@@ -100,23 +96,10 @@ const QoiEnc = struct {
         enc.offset += 1;
     }
     fn qoiEncFullColor(enc: *QoiEnc, px: QoiPixel, channels: u8) void {
-        const s: u3 = @intCast(channels + 1);
-        const tags: [5]u8 = if (channels > 3) .{
-            @intFromEnum(QoiEnum.QOI_OP_RGBA),
-            px.vals.red,
-            px.vals.green,
-            px.vals.blue,
-            px.vals.alpha,
-        } else .{
-            @intFromEnum(QoiEnum.QOI_OP_RGB),
-            px.vals.red,
-            px.vals.green,
-            px.vals.blue,
-            undefined,
-        };
-
-        for (tags[0..s], 0..s) |tag, i| enc.offset[i] = tag;
-        enc.offset += s;
+        const qoi_opcode: u8 = if (channels > 3) @intFromEnum(QoiEnum.QOI_OP_RGBA) else @intFromEnum(QoiEnum.QOI_OP_RGB);
+        const tags = [_]u8{ qoi_opcode, px.vals.red, px.vals.green, px.vals.blue, px.vals.alpha };
+        for (tags[0 .. channels + 1], 0..channels + 1) |tag, i| enc.offset[i] = tag;
+        enc.offset += channels + 1;
     }
     fn qoiEncDifference(enc: *QoiEnc, red_diff: i32, green_diff: i32, blue_diff: i32) void {
         const green_diff_biased: u8 = @intCast(green_diff + 2);

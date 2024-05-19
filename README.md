@@ -8,7 +8,7 @@ This Zig program encodes a subset of Portable Arbitrary Map (PAM) images into th
 
 ## Program Details
 
-I wrote this mostly as a learning exercise, so I hope that the details below can help you learn from this implementation as well. I was heavily inspired by the [Simplified QOI Codec Library](https://github.com/Aftersol/Simplified-QOI-Codec), a one header file library for encoding and decoding QOI files written in C.
+I wrote this mostly as a learning exercise, and I was heavily inspired by the [Simplified QOI Codec Library](https://github.com/Aftersol/Simplified-QOI-Codec), a one header file library for encoding and decoding QOI files written in C.
 
 ### Benchmarks
 
@@ -124,7 +124,7 @@ qoi-zig photograph.pam photograph.qoi 1
 
 These commands will create QOI image files from the inputs shown. The original and compressed file sizes are printed upon successful encoding.
 
-This program does not perform any error checking on the input file. It is assumed that the file is a compatible PAM file. Incorrect input can lead to unexpected results or program crashes; always ensure that your input data is correct before running the program.
+This program does not perform any error checking on the input file. It is assumed that the file is a compatible PAM file. Incorrect inputs can lead to unexpected results or program crashes; always ensure that your input data is correct before running the program.
 
 ## Dependencies
 
