@@ -34,9 +34,6 @@ const QoiDesc = struct {
     channels: u8 = 0,
     colorspace: u8 = 0,
 
-    fn qoiSetEverything(w: u32, h: u32, ch: u8, c: u8) QoiDesc {
-        return QoiDesc{ .width = w, .height = h, .channels = ch, .colorspace = c };
-    }
     fn writeQoiHeader(self: QoiDesc, dest: *[14]u8) void {
         @memcpy(dest[0..4], QOI_MAGIC);
         writeInt(u32, dest[4..8], self.width, .big);
@@ -103,8 +100,7 @@ const QoiEnc = struct {
         enc.offset += 1;
     }
     fn qoiEncFullColor(enc: *QoiEnc, px: QoiPixel, channels: u8) void {
-        var s: u3 = 0;
-        if (channels > 3) s = 5 else s = 4;
+        const s: u3 = @intCast(channels + 1);
         const tags: [5]u8 = if (channels > 3) .{
             @intFromEnum(QoiEnum.QOI_OP_RGBA),
             px.vals.red,
@@ -156,13 +152,21 @@ fn printHelp() !void {
 
 fn parsePamHeader(bytes_read: []u8, width: *u32, height: *u32, channels: *u8) !usize {
     var header_tokens = std.mem.tokenizeAny(u8, bytes_read[0..], " \n\r");
+    var widthOffset: usize = undefined;
+    var heightOffset: usize = undefined;
     var i: u4 = 0;
     while (true) : (i += 1) {
         const token = header_tokens.next();
         if (token == null or token.?.len == 0) break;
         switch (i) {
-            2 => width.* = try parseInt(u32, token.?, 10),
-            4 => height.* = try parseInt(u32, token.?, 10),
+            2 => {
+                width.* = try parseInt(u32, token.?, 10);
+                widthOffset = token.?.len - 1;
+            },
+            4 => {
+                height.* = try parseInt(u32, token.?, 10);
+                heightOffset = token.?.len - 1;
+            },
             6 => channels.* = try parseInt(u8, token.?, 10),
             8 => if (try parseInt(u16, token.?, 10) > 255) return error.OutOfBounds else {},
             else => {},
@@ -174,22 +178,7 @@ fn parsePamHeader(bytes_read: []u8, width: *u32, height: *u32, channels: *u8) !u
 
     var offset: usize = 59;
     if (channels.* > 3) offset += 6;
-
-    offset += switch (width.*) {
-        0...9 => 0,
-        10...99 => 1,
-        100...999 => 2,
-        1000...9999 => 3,
-        else => 4,
-    };
-    offset += switch (height.*) {
-        0...9 => 0,
-        10...99 => 1,
-        100...999 => 2,
-        1000...9999 => 3,
-        else => 4,
-    };
-
+    offset += widthOffset + heightOffset;
     return offset;
 }
 
@@ -226,7 +215,7 @@ fn qoiEncodeChunk(desc: *QoiDesc, enc: *QoiEnc, qoi_pixel_bytes: [*]u8) void {
 
     enc.buffer[index_pos] = cur_pixel;
 
-    if (desc.channels > 3 and cur_pixel.vals.alpha != enc.prev_pixel.vals.alpha) {
+    if (cur_pixel.vals.alpha != enc.prev_pixel.vals.alpha) {
         enc.qoiEncFullColor(cur_pixel, desc.channels);
         enc.finishEncodeChunk(cur_pixel);
         return;
@@ -305,7 +294,7 @@ pub fn main() !void {
         return error.InvalidInput;
     }
 
-    var desc = QoiDesc.qoiSetEverything(width, height, channels, colorspace);
+    var desc: QoiDesc = .{ .width = width, .height = height, .channels = channels, .colorspace = colorspace };
 
     const qoi_file_size = @as(usize, desc.width) * @as(usize, desc.height) * (@as(usize, desc.channels) + 1) + 14 + 8 + @sizeOf(usize);
     var qoi_file = try allocator.alloc(u8, qoi_file_size);
