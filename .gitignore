@@ -1,8 +1,9 @@
-# macOS-specific
+# macOS
 .DS_Store
 
-# Zig-specific
+# Zig
 zig-cache/
+.zig-cache/
 zig-out/
 /release/
 /debug/
@@ -10,5 +11,5 @@ zig-out/
 /build-*/
 /docgen_tmp/
 
-# Encoder-specific
+# Encoder
 *.qoi
