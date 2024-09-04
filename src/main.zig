@@ -129,8 +129,10 @@ const QoiEnc = struct {
 
 fn printHelp() !void {
     print("Freestanding QOI Encoder in \x1b[33mZig\x1b[0m\n", .{});
-    print("Example usage: qoi-zig [input.pam] [output] [colorspace]\n", .{});
+    print("Example usage: qoi-zig [input.pam] [output] [colorspace] [color_depth] [dither]\n", .{});
     print("Colorspace:\n\t0: sRGB w/ Linear Alpha\n\t1: Linear RGB\n", .{});
+    print("Color Depth:\n\t0: Same as Source\n\t*: Palletize\n", .{});
+    print("Dithering:\n\t0: None\n\t1: Sierra Lite\n", .{});
 }
 
 fn parsePamHeader(bytes_read: []u8, width: *u32, height: *u32, channels: *u8) !usize {
@@ -157,7 +159,6 @@ fn parsePamHeader(bytes_read: []u8, width: *u32, height: *u32, channels: *u8) !u
     }
     print("Dimensions: {d}x{d} | \x1b[31mR\x1b[0m\x1b[32mG\x1b[0m\x1b[34mB\x1b[0m", .{ width.*, height.* });
     if (channels.* > 3) print("\x1b[37mA\x1b[0m", .{});
-    print("\n", .{});
 
     var offset: usize = 59;
     if (channels.* > 3) offset += 6;
@@ -228,6 +229,62 @@ fn qoiEncodeChunk(desc: *QoiDesc, enc: *QoiEnc, qoi_pixel_bytes: [*]u8) void {
     enc.finishEncodeChunk(cur_pixel);
 }
 
+fn palletizeInput(pixel_seek: [*]u8, total_pixels: u32, channels: u8, quantize_factor: u16) void {
+    for (0..total_pixels) |p| {
+        const o = p * channels;
+        for (0..channels) |c| {
+            pixel_seek[o + c] = @intCast(pixel_seek[o + c] / quantize_factor * quantize_factor);
+        }
+    }
+}
+
+fn sierraLite(pixel_seek: [*]u8, width: u32, height: u32, channels: u8, quantize_factor: u16) void {
+    var error_buffer = [_]f32{0} ** 3;
+
+    for (0..height) |y| {
+        for (0..width) |x| {
+            const pixel_index = (y * width + x) * channels;
+            var new_pixel: [3]u8 = undefined;
+
+            for (0..3) |c| {
+                var pixel_value: f32 = @floatFromInt(pixel_seek[pixel_index + c]);
+                pixel_value += error_buffer[c];
+
+                const qv: i32 = @intFromFloat(@round(pixel_value / @as(f32, @floatFromInt(quantize_factor))) * @as(f32, @floatFromInt(quantize_factor)));
+                const quantized_value: u8 = @intCast(std.math.clamp(qv, 0, 255));
+
+                new_pixel[c] = quantized_value;
+                const quantization_error: f32 = pixel_value - @as(f32, @floatFromInt(quantized_value));
+
+                // Distribute the error according to Sierra Lite filter
+                error_buffer[c] = 0; // Reset error buffer for next pixel
+
+                if (x < width - 1) {
+                    const index = (y * width + (x + 1)) * channels + c;
+                    const pix: i16 = @intFromFloat(@as(f32, @floatFromInt(pixel_seek[index])) + quantization_error * (2.0 / 4.0));
+                    pixel_seek[index] = @intCast(std.math.clamp(pix, 0, 255));
+                }
+
+                if (y < height - 1) {
+                    if (x > 0) {
+                        const index = ((y + 1) * width + (x - 1)) * channels + c;
+                        const pix: i16 = @intFromFloat(@as(f32, @floatFromInt(pixel_seek[index])) + quantization_error * (1.0 / 4.0));
+                        pixel_seek[index] = @intCast(std.math.clamp(pix, 0, 255));
+                    }
+                    const index = ((y + 1) * width + x) * channels + c;
+                    const pix: i16 = @intFromFloat(@as(f32, @floatFromInt(pixel_seek[index])) + quantization_error * (1.0 / 4.0));
+                    pixel_seek[index] = @intCast(std.math.clamp(pix, 0, 255));
+                }
+            }
+
+            // Update the pixel values
+            for (0..3) |c| {
+                pixel_seek[pixel_index + c] = new_pixel[c];
+            }
+        }
+    }
+}
+
 pub fn main() !void {
     // Get allocator
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -238,10 +295,15 @@ pub fn main() !void {
     const args = try std.process.argsAlloc(allocator);
     defer std.process.argsFree(allocator, args);
 
+    if (args.len < 2) {
+        print("Usage: qoi-zig [input.pam] [output] [colorspace] [color_depth] [dither]\n", .{});
+        print("Help: qoi-zig -h\n", .{});
+        return;
+    }
+
     if (eql(u8, args[1], "-h") or
         eql(u8, args[1], "--help") or
-        args.len < 4 or
-        args.len > 4 or
+        args.len != 6 or
         args[1].len < 1)
     {
         _ = try printHelp();
@@ -251,7 +313,9 @@ pub fn main() !void {
     var width: u32 = undefined;
     var height: u32 = undefined;
     var channels: u8 = undefined;
-    const colorspace: u8 = try parseInt(u8, args[3], 10);
+    const colorspace: u8 = try parseInt(u2, args[3], 10);
+    const color_depth: u16 = try parseInt(u16, args[4], 10);
+    const dither: u8 = try parseInt(u2, args[5], 10);
 
     print("Opening {s} ... ", .{args[1]});
 
@@ -283,12 +347,34 @@ pub fn main() !void {
     var qoi_file = try allocator.alloc(u8, qoi_file_size);
     defer allocator.free(qoi_file);
 
+    var pixel_seek: [*]u8 = bytes_read[offset..].ptr;
+
+    switch (color_depth) {
+        0 => {
+            print(" | Lossless\n", .{});
+        },
+        else => {
+            print(" | Lossy ({d}-bit pallette, ", .{color_depth});
+            const quantize_factor: u16 = @as(u16, 256) / color_depth;
+            switch (dither) {
+                0 => {
+                    print("no dithering)\n", .{});
+                    const total_pixels: u32 = width * height;
+                    palletizeInput(pixel_seek, total_pixels, channels, quantize_factor);
+                },
+                else => {
+                    print("dithering)\n", .{});
+                    sierraLite(pixel_seek, width, height, channels, quantize_factor);
+                },
+            }
+        },
+    }
+
+    var enc: QoiEnc = undefined;
+
     print("Writing {s} ... ", .{args[2]});
 
     desc.writeQoiHeader(qoi_file[0..14]);
-
-    var pixel_seek: [*]u8 = bytes_read[offset..].ptr;
-    var enc: QoiEnc = undefined;
 
     try enc.qoiEncInit(desc, qoi_file.ptr);
 
