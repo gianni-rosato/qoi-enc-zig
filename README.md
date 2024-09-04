@@ -64,7 +64,7 @@ FFmpeg is pretty fast, but it is evident there is more going on under the hood t
 
 ## Building
 
-In order to build this program, you will need to have the latest version of the Zig programming language (at least version `0.12.0-dev.2922`) installed on your system as well as `git`. You can find instructions for installing Zig on the [official website](https://ziglang.org/). Once that is set up, follow the steps below for building the `qoi-zig` binary:
+In order to build this program, you will need to have the latest version of the Zig programming language (at least version `0.13.0`) installed on your system as well as `git`. You can find instructions for installing Zig on the [official website](https://ziglang.org/). Once that is set up, follow the steps below for building the `qoi-zig` binary:
 
 ```bash
 git clone https://github.com/gianni-rosato/qoi-enc-zig # Clone the repo
@@ -79,12 +79,25 @@ zig build -Doptimize=ReleaseFast # Build the program
 The program is run from the command line with the following arguments:
 
 ```bash
-qoi-zig [input.pam] [output] [colorspace]
+qoi-zig -h
+Freestanding QOI Encoder in Zig
+Example usage: qoi-zig [input.pam] [output] [colorspace] [color_depth] [dither]
+Colorspace:
+	0: sRGB w/ Linear Alpha
+	1: Linear RGB
+Color Depth:
+	0: Same as Source
+	*: Palletize
+Dithering:
+	0: None
+	1: Sierra Lite
 ```
 
 - `input.pam`: The input PAM image file to encode.
 - `output`: The output QOI image file to create.
 - `colorspace`: The colorspace of the image. Use `0` for sRGB with linear alpha and `1` for linear RGB.
+- `color_depth`: The color depth of the image. Use `0` for the same as the source image (lossless), and any other number to lossily palletize the image to that specified color depth.
+- `dither`: The dithering algorithm to use. Use `0` for no dithering and `1` for Sierra Lite dithering.
 
 If the input file is too small for the specified image dimensions & channels, an error message is printed.
 
@@ -128,7 +141,7 @@ This program does not perform any error checking on the input file. It is assume
 
 ## Dependencies
 
-This program requires the Zig programming language, at least version `0.12.0`. It also uses the standard library provided with Zig. No other dependencies are required.
+This program requires the Zig programming language, at least version `0.13.0`. It also uses the standard library provided with Zig. No other dependencies are required.
 
 ## License
 
