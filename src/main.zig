@@ -3,6 +3,7 @@ const print = std.debug.print;
 const parseInt = std.fmt.parseInt;
 const writeInt = std.mem.writeInt;
 const eql = std.mem.eql;
+const clamp = std.math.clamp;
 
 const QoiEnum = enum(u8) {
     QOI_OP_RGB = 0xFE,
@@ -239,41 +240,32 @@ fn palletizeInput(pixel_seek: [*]u8, total_pixels: u32, channels: u8, quantize_f
 }
 
 fn sierraLite(pixel_seek: [*]u8, width: u32, height: u32, channels: u8, quantize_factor: u16) void {
-    var error_buffer = [_]f32{0} ** 3;
-
     for (0..height) |y| {
         for (0..width) |x| {
             const pixel_index = (y * width + x) * channels;
             var new_pixel: [3]u8 = undefined;
 
             for (0..3) |c| {
-                var pixel_value: f32 = @floatFromInt(pixel_seek[pixel_index + c]);
-                pixel_value += error_buffer[c];
+                const pixel_value: f32 = @floatFromInt(pixel_seek[pixel_index + c]);
+                new_pixel[c] = @intCast(clamp(@as(u8, @intFromFloat(@round(pixel_value / @as(f32, @floatFromInt(quantize_factor))) * @as(f32, @floatFromInt(quantize_factor)))), 0, 255));
 
-                const qv: i32 = @intFromFloat(@round(pixel_value / @as(f32, @floatFromInt(quantize_factor))) * @as(f32, @floatFromInt(quantize_factor)));
-                const quantized_value: u8 = @intCast(std.math.clamp(qv, 0, 255));
-
-                new_pixel[c] = quantized_value;
-                const quantization_error: f32 = pixel_value - @as(f32, @floatFromInt(quantized_value));
-
-                // Distribute the error according to Sierra Lite filter
-                error_buffer[c] = 0; // Reset error buffer for next pixel
+                const quantization_error: f32 = pixel_value - @as(f32, @floatFromInt(new_pixel[c]));
 
                 if (x < width - 1) {
                     const index = (y * width + (x + 1)) * channels + c;
                     const pix: i16 = @intFromFloat(@as(f32, @floatFromInt(pixel_seek[index])) + quantization_error * (2.0 / 4.0));
-                    pixel_seek[index] = @intCast(std.math.clamp(pix, 0, 255));
+                    pixel_seek[index] = @intCast(clamp(pix, 0, 255));
                 }
 
                 if (y < height - 1) {
                     if (x > 0) {
                         const index = ((y + 1) * width + (x - 1)) * channels + c;
                         const pix: i16 = @intFromFloat(@as(f32, @floatFromInt(pixel_seek[index])) + quantization_error * (1.0 / 4.0));
-                        pixel_seek[index] = @intCast(std.math.clamp(pix, 0, 255));
+                        pixel_seek[index] = @intCast(clamp(pix, 0, 255));
                     }
                     const index = ((y + 1) * width + x) * channels + c;
                     const pix: i16 = @intFromFloat(@as(f32, @floatFromInt(pixel_seek[index])) + quantization_error * (1.0 / 4.0));
-                    pixel_seek[index] = @intCast(std.math.clamp(pix, 0, 255));
+                    pixel_seek[index] = @intCast(clamp(pix, 0, 255));
                 }
             }
 
