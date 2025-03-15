@@ -15,7 +15,7 @@ const QoiEnum = enum(u8) {
     QOI_OP_RUN = 0xC0,
 };
 
-const QOI_MAGIC = "qoif";
+const QOI_MAGIC: *const [4:0]u8 = "qoif";
 const QOI_PADDING: *const [8]u8 = &.{ 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01 };
 
 const QoiPixel = extern union {
