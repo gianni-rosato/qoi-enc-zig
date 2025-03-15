@@ -122,6 +122,7 @@ const QoiEnc = struct {
         enc.pixel_offset += 1;
 
         if (enc.pixel_offset >= enc.len) {
+            if (enc.run > 0) enc.qoiEncRun();
             @memcpy(enc.offset[0..QOI_PADDING.len], QOI_PADDING);
             enc.offset += QOI_PADDING.len;
         }
