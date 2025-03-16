@@ -47,6 +47,7 @@ const QoiDesc = struct {
 const QoiEnc = struct {
     buffer: [64]QoiPixel,
     prev_pixel: QoiPixel,
+    cur_pixel: QoiPixel,
 
     pixel_offset: usize,
     len: usize,
@@ -71,6 +72,8 @@ const QoiEnc = struct {
         for (0..3) |i| self.prev_pixel.channels[i] = 0;
         self.prev_pixel.vals.alpha = 255;
 
+        self.cur_pixel = undefined;
+
         self.data = data;
         self.offset = self.data + 14;
     }
@@ -90,19 +93,24 @@ const QoiEnc = struct {
 
         for (tags, 0..) |tag, i| self.offset[i] = tag;
         self.offset += tags.len;
+
+        self.finishEncodeChunk();
     }
-    fn qoiEncIndex(enc: *QoiEnc, index_pos: u8) void {
+    fn qoiEncIndex(self: *QoiEnc, index_pos: u8) void {
         const tag: u8 = @intFromEnum(QoiEnum.QOI_OP_INDEX) | index_pos;
-        enc.offset[0] = tag;
-        enc.offset += 1;
+        self.offset[0] = tag;
+        self.offset += 1;
+        self.finishEncodeChunk();
     }
-    fn qoiEncFullColor(enc: *QoiEnc, px: QoiPixel, channels: u8) void {
+    fn qoiEncFullColor(self: *QoiEnc, channels: u8) void {
+        const px: QoiPixel = self.cur_pixel;
         const qoi_opcode: u8 = if (channels > 3) @intFromEnum(QoiEnum.QOI_OP_RGBA) else @intFromEnum(QoiEnum.QOI_OP_RGB);
         const tags = [_]u8{ qoi_opcode, px.vals.red, px.vals.green, px.vals.blue, px.vals.alpha };
-        for (tags[0 .. channels + 1], 0..channels + 1) |tag, i| enc.offset[i] = tag;
-        enc.offset += channels + 1;
+        for (tags[0 .. channels + 1], 0..channels + 1) |tag, i| self.offset[i] = tag;
+        self.offset += channels + 1;
+        self.finishEncodeChunk();
     }
-    fn qoiEncDifference(enc: *QoiEnc, red_diff: i32, green_diff: i32, blue_diff: i32) void {
+    fn qoiEncDifference(self: *QoiEnc, red_diff: i32, green_diff: i32, blue_diff: i32) void {
         const green_diff_biased: u8 = @intCast(green_diff + 2);
         const red_diff_biased: u8 = @intCast(red_diff + 2);
         const blue_diff_biased: u8 = @intCast(blue_diff + 2);
@@ -113,18 +121,19 @@ const QoiEnc = struct {
             green_diff_biased << 2 |
             blue_diff_biased;
 
-        enc.offset[0] = tag;
+        self.offset[0] = tag;
 
-        enc.offset += 1;
+        self.offset += 1;
+        self.finishEncodeChunk();
     }
-    fn finishEncodeChunk(enc: *QoiEnc, cur_pixel: QoiPixel) void {
-        enc.prev_pixel = cur_pixel;
-        enc.pixel_offset += 1;
+    fn finishEncodeChunk(self: *QoiEnc) void {
+        self.prev_pixel = self.cur_pixel;
+        self.pixel_offset += 1;
 
-        if (enc.pixel_offset >= enc.len) {
-            if (enc.run > 0) enc.qoiEncRun();
-            @memcpy(enc.offset[0..QOI_PADDING.len], QOI_PADDING);
-            enc.offset += QOI_PADDING.len;
+        if (self.pixel_offset == self.len) {
+            if (self.run > 0) self.qoiEncRun();
+            @memcpy(self.offset[0..QOI_PADDING.len], QOI_PADDING);
+            self.offset += QOI_PADDING.len;
         }
     }
 };
@@ -172,63 +181,52 @@ fn qoiComparePixel(pixel1: QoiPixel, pixel2: QoiPixel) bool {
     return pixel1.concatenated_pixel_values == pixel2.concatenated_pixel_values;
 }
 
-fn qoiEncodeChunk(desc: *QoiDesc, enc: *QoiEnc, qoi_pixel_bytes: [*]u8) void {
-    var cur_pixel: QoiPixel = undefined;
-
-    if (desc.channels < 4) {
-        cur_pixel.vals.alpha = 255;
-        @memcpy(cur_pixel.channels[0..3], qoi_pixel_bytes[0..3]);
-    } else {
-        @memcpy(&cur_pixel.channels, qoi_pixel_bytes[0..4]);
-    }
-
-    if (qoiComparePixel(cur_pixel, enc.prev_pixel)) {
+fn qoiEncodeChunk(desc: *QoiDesc, enc: *QoiEnc) void {
+    if (qoiComparePixel(enc.cur_pixel, enc.prev_pixel)) {
         enc.run += 1;
         if (enc.run >= 62 or enc.pixel_offset >= enc.len) enc.qoiEncRun();
-        enc.finishEncodeChunk(cur_pixel);
+        enc.finishEncodeChunk();
         return;
     }
 
     if (enc.run > 0) enc.qoiEncRun();
 
-    const index_pos: u6 = @truncate(cur_pixel.vals.red *% 3 +% cur_pixel.vals.green *% 5 +% cur_pixel.vals.blue *% 7 +% cur_pixel.vals.alpha *% 11);
+    const index_pos: u6 =
+        @truncate(enc.cur_pixel.vals.red *% 3 +% enc.cur_pixel.vals.green *% 5 +% enc.cur_pixel.vals.blue *% 7 +% enc.cur_pixel.vals.alpha *% 11);
 
-    if (qoiComparePixel(enc.buffer[index_pos], cur_pixel)) {
+    if (qoiComparePixel(enc.buffer[index_pos], enc.cur_pixel)) {
         enc.qoiEncIndex(index_pos);
-        enc.finishEncodeChunk(cur_pixel);
         return;
     }
 
-    enc.buffer[index_pos] = cur_pixel;
+    enc.buffer[index_pos] = enc.cur_pixel;
 
-    if (cur_pixel.vals.alpha != enc.prev_pixel.vals.alpha) {
-        enc.qoiEncFullColor(cur_pixel, desc.channels);
-        enc.finishEncodeChunk(cur_pixel);
+    if (enc.cur_pixel.vals.alpha != enc.prev_pixel.vals.alpha) {
+        enc.qoiEncFullColor(desc.channels);
         return;
     }
 
-    const red_diff: i32 = @as(i32, cur_pixel.vals.red) - @as(i32, enc.prev_pixel.vals.red);
-    const green_diff: i32 = @as(i32, cur_pixel.vals.green) - @as(i32, enc.prev_pixel.vals.green);
-    const blue_diff: i32 = @as(i32, cur_pixel.vals.blue) - @as(i32, enc.prev_pixel.vals.blue);
+    const red_diff: i32 = @as(i32, enc.cur_pixel.vals.red) - @as(i32, enc.prev_pixel.vals.red);
+    const green_diff: i32 = @as(i32, enc.cur_pixel.vals.green) - @as(i32, enc.prev_pixel.vals.green);
+    const blue_diff: i32 = @as(i32, enc.cur_pixel.vals.blue) - @as(i32, enc.prev_pixel.vals.blue);
 
-    const dr_dg: i32 = red_diff - green_diff;
-    const db_dg: i32 = blue_diff - green_diff;
+    const small_r_diff: bool = if (red_diff >= -2 and red_diff <= 1) true else false;
+    const small_g_diff: bool = if (green_diff >= -2 and green_diff <= 1) true else false;
+    const small_b_diff: bool = if (blue_diff >= -2 and blue_diff <= 1) true else false;
 
-    if (red_diff >= -2 and red_diff <= 1 and
-        green_diff >= -2 and green_diff <= 1 and
-        blue_diff >= -2 and blue_diff <= 1)
-    {
+    const med_rg_diff: bool = if (red_diff - green_diff >= -8 and red_diff - green_diff <= 7) true else false;
+    const med_bg_diff: bool = if (blue_diff - green_diff >= -8 and blue_diff - green_diff <= 7) true else false;
+    const med_g_diff: bool = if (green_diff >= -32 and green_diff <= 31) true else false;
+
+    if (small_r_diff and small_g_diff and small_b_diff) {
         enc.qoiEncDifference(@intCast(red_diff), @intCast(green_diff), @intCast(blue_diff));
-    } else if (dr_dg >= -8 and dr_dg <= 7 and
-        green_diff >= -32 and green_diff <= 31 and
-        db_dg >= -8 and db_dg <= 7)
-    {
-        enc.qoiEncLuma(@intCast(green_diff), @intCast(dr_dg), @intCast(db_dg));
-    } else {
-        enc.qoiEncFullColor(cur_pixel, desc.channels);
+        return;
+    } else if (med_rg_diff and med_bg_diff and med_g_diff) {
+        enc.qoiEncLuma(@intCast(green_diff), @intCast(red_diff - green_diff), @intCast(blue_diff - green_diff));
+        return;
     }
 
-    enc.finishEncodeChunk(cur_pixel);
+    enc.qoiEncFullColor(desc.channels);
 }
 
 fn palletizeInput(pixel_seek: [*]u8, total_pixels: u32, channels: u8, quantize_factor: u16) void {
@@ -270,7 +268,6 @@ fn sierraLite(pixel_seek: [*]u8, width: u32, height: u32, channels: u8, quantize
                 }
             }
 
-            // Update the pixel values
             for (0..3) |c| {
                 pixel_seek[pixel_index + c] = new_pixel[c];
             }
@@ -279,12 +276,9 @@ fn sierraLite(pixel_seek: [*]u8, width: u32, height: u32, channels: u8, quantize
 }
 
 pub fn main() !void {
-    // Get allocator
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
     defer _ = gpa.deinit();
-
-    // Parse args into string array (error union needs 'try')
     const args = try std.process.argsAlloc(allocator);
     defer std.process.argsFree(allocator, args);
 
@@ -371,9 +365,11 @@ pub fn main() !void {
 
     try enc.qoiEncInit(desc, qoi_file.ptr);
 
-    while (!(enc.pixel_offset >= enc.len)) {
-        qoiEncodeChunk(&desc, &enc, pixel_seek);
-        pixel_seek += desc.channels;
+    while (enc.pixel_offset < enc.len) {
+        enc.cur_pixel.vals.alpha = 255;
+        @memcpy(enc.cur_pixel.channels[0..channels], pixel_seek[0..channels]);
+        qoiEncodeChunk(&desc, &enc);
+        pixel_seek += channels;
     }
 
     const used_len = @intFromPtr(enc.offset) - @intFromPtr(enc.data);

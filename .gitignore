@@ -13,3 +13,4 @@ zig-out/
 
 # Encoder
 *.qoi
+*.sh
