@@ -81,7 +81,7 @@ there. Even so, we'll take what we can get!
 ## Building
 
 In order to build this program, you will need to have the latest version of the
-Zig programming language (at least version `0.14.0`) installed on your system as
+Zig programming language (at least version `0.15.1`) installed on your system as
 well as `git`. You can find instructions for installing Zig on the
 [official website](https://ziglang.org/). Once that is set up, follow the steps
 below for building the `qoi-zig` binary:
@@ -180,7 +180,7 @@ correct before running the program.
 
 ## Dependencies
 
-This program requires the Zig programming language, at least version `0.14.0`.
+This program requires the Zig programming language, at least version `0.15.1`.
 It also uses the standard library provided with Zig. No other dependencies are
 required.
 
