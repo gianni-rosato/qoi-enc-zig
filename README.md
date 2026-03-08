@@ -1,3 +1,7 @@
+# Deprecated Project
+
+Succeeded by [qoilib](https://github.com/gianni-rosato/qoilib) which includes decode support.
+
 # QOI Image Encoder in Zig
 
 This Zig program encodes a subset of Portable Arbitrary Map (PAM) images into
